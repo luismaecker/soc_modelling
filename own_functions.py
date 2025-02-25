@@ -7,6 +7,12 @@ import matplotlib.pyplot as plt
 from scipy.stats import pearsonr
 from sklearn.metrics import pairwise_distances
 from sklearn.decomposition import PCA
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
 
 ########################################################
 # Functions for data preprocessing
@@ -481,3 +487,173 @@ def evaluate_model(model, X_test, y_test, print_metrics=True, show_plot=True, pl
         'bias': bias,
         'rpd': rpd
     }
+
+
+########################################################
+# Modelling
+########################################################
+
+
+class LSTMModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size, num_layers, dropout=0.2):
+        super(LSTMModel, self).__init__()
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        
+        # LSTM layers with dropout
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, 
+                           batch_first=True, dropout=dropout)
+        
+        # Additional dropout layers
+        self.dropout1 = nn.Dropout(dropout)
+        self.batch_norm = nn.BatchNorm1d(hidden_size)
+        
+        # Fully connected layer
+        self.fc = nn.Linear(hidden_size, output_size)
+    
+    def forward(self, x):
+        # Initialize hidden and cell states
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).to(x.device)
+        
+        # Forward pass through LSTM layer
+        out, _ = self.lstm(x, (h0, c0))
+        # Select the last time step
+        out = out[:, -1, :]
+        # Forward pass through fully connected layer
+        out = self.fc(out)
+        return out
+        
+    
+    def predict(self, X):
+        self.eval()  # Set to evaluation mode
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+        with torch.no_grad():
+            predictions = self(X_tensor.unsqueeze(1)).squeeze()
+        return predictions.numpy()
+
+class EarlyStopping:
+    """Early stopping to prevent overfitting"""
+    def __init__(self, patience=7, min_delta=0):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.best_loss = None
+        self.early_stop = False
+        self.best_model = None
+        
+    def __call__(self, val_loss, model):
+        if self.best_loss is None:
+            self.best_loss = val_loss
+            self.best_model = model.state_dict().copy()
+        elif val_loss > self.best_loss - self.min_delta:
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_loss = val_loss
+            self.best_model = model.state_dict().copy()
+            self.counter = 0
+
+def train_and_evaluate_lstm(X_train, X_val, X_test, y_train, y_val, y_test, 
+                          hidden_size=256, num_layers=5, num_epochs=500, 
+                          learning_rate=0.005, patience=7, dropout=0.2):
+    # Convert to tensors
+    X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+    X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
+    X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32)
+    y_test_tensor = torch.tensor(y_test, dtype=torch.float32)
+    
+    # Initialize model and training components
+    input_size = X_train.shape[1]
+    model = LSTMModel(input_size, hidden_size, 1, num_layers, dropout)
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    early_stopping = EarlyStopping(patience=patience)
+    
+    # Training history
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'best_epoch': 0
+    }
+    
+    # Training loop
+    for epoch in range(num_epochs):
+        # Training phase
+        model.train()
+        optimizer.zero_grad()
+        train_outputs = model(X_train_tensor.unsqueeze(1))
+        train_loss = criterion(train_outputs.squeeze(), y_train_tensor)
+        train_loss.backward()
+        optimizer.step()
+        
+        # Validation phase
+        model.eval()
+        with torch.no_grad():
+            val_outputs = model(X_val_tensor.unsqueeze(1))
+            val_loss = criterion(val_outputs.squeeze(), y_val_tensor)
+            
+        # Store losses
+        history['train_loss'].append(train_loss.item())
+        history['val_loss'].append(val_loss.item())
+        
+        # Early stopping check
+        early_stopping(val_loss, model)
+        if early_stopping.early_stop:
+            print(f'Early stopping triggered at epoch {epoch + 1}')
+            history['best_epoch'] = epoch - patience
+            break
+            
+        if (epoch + 1) % 10 == 0:
+            print(f'Epoch [{epoch + 1}/{num_epochs}], '
+                  f'Train Loss: {train_loss.item():.4f}, '
+                  f'Val Loss: {val_loss.item():.4f}')
+    
+    # Load best model
+    model.load_state_dict(early_stopping.best_model)
+    
+    # Final evaluation
+    model.eval()
+    with torch.no_grad():
+        final_predictions = model(X_test_tensor.unsqueeze(1)).squeeze()
+        test_loss = criterion(final_predictions, y_test_tensor)
+        
+        # Convert to numpy for metrics
+        y_pred = final_predictions.numpy()
+        y_true = y_test_tensor.numpy()
+        
+        # Calculate metrics
+        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+        r2 = r2_score(y_true, y_pred)
+        bias = np.mean(y_pred - y_true)
+        rpd = np.std(y_true) / rmse
+        
+        metrics = {
+            'test_loss': test_loss.item(),
+            'rmse': rmse,
+            'r2': r2,
+            'bias': bias,
+            'rpd': rpd
+        }
+        
+        print("\nFinal Test Metrics:")
+        for metric, value in metrics.items():
+            print(f"{metric}: {value:.4f}")
+    
+    # Plot training history
+    plt.figure(figsize=(10, 5))
+    plt.plot(history['train_loss'], label='Training Loss')
+    plt.plot(history['val_loss'], label='Validation Loss')
+    plt.axvline(x=history['best_epoch'], color='r', linestyle='--', label='Best Model')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
+    return model, history, metrics

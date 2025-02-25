@@ -1,3 +1,4 @@
 __pycache__
 AutogluonModels/
 test
+data/stac_data_cache/
