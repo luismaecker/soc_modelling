@@ -8,6 +8,7 @@ from scipy.stats import pearsonr
 from sklearn.metrics import pairwise_distances
 from sklearn.decomposition import PCA
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -555,9 +556,10 @@ class EarlyStopping:
             self.best_model = model.state_dict().copy()
             self.counter = 0
 
-def train_and_evaluate_lstm(X_train, X_val, X_test, y_train, y_val, y_test, 
+def train_lstm(X_train, X_val, X_test, y_train, y_val, y_test, 
                           hidden_size=256, num_layers=5, num_epochs=500, 
-                          learning_rate=0.005, patience=7, dropout=0.2):
+                          learning_rate=0.005, patience=7, dropout=0.2,
+                          show_training=False, show_history=False):
     # Convert to tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
@@ -606,11 +608,12 @@ def train_and_evaluate_lstm(X_train, X_val, X_test, y_train, y_val, y_test,
             print(f'Early stopping triggered at epoch {epoch + 1}')
             history['best_epoch'] = epoch - patience
             break
-            
-        if (epoch + 1) % 10 == 0:
-            print(f'Epoch [{epoch + 1}/{num_epochs}], '
-                  f'Train Loss: {train_loss.item():.4f}, '
-                  f'Val Loss: {val_loss.item():.4f}')
+
+        if show_training:    
+            if (epoch + 1) % 10 == 0:
+                print(f'Epoch [{epoch + 1}/{num_epochs}], '
+                    f'Train Loss: {train_loss.item():.4f}, '
+                    f'Val Loss: {val_loss.item():.4f}')
     
     # Load best model
     model.load_state_dict(early_stopping.best_model)
@@ -620,40 +623,164 @@ def train_and_evaluate_lstm(X_train, X_val, X_test, y_train, y_val, y_test,
     with torch.no_grad():
         final_predictions = model(X_test_tensor.unsqueeze(1)).squeeze()
         test_loss = criterion(final_predictions, y_test_tensor)
-        
-        # Convert to numpy for metrics
-        y_pred = final_predictions.numpy()
-        y_true = y_test_tensor.numpy()
-        
-        # Calculate metrics
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-        r2 = r2_score(y_true, y_pred)
-        bias = np.mean(y_pred - y_true)
-        rpd = np.std(y_true) / rmse
-        
-        metrics = {
-            'test_loss': test_loss.item(),
-            'rmse': rmse,
-            'r2': r2,
-            'bias': bias,
-            'rpd': rpd
-        }
-        
-        print("\nFinal Test Metrics:")
-        for metric, value in metrics.items():
-            print(f"{metric}: {value:.4f}")
+
+        print(test_loss)
     
-    # Plot training history
-    plt.figure(figsize=(10, 5))
-    plt.plot(history['train_loss'], label='Training Loss')
-    plt.plot(history['val_loss'], label='Validation Loss')
-    plt.axvline(x=history['best_epoch'], color='r', linestyle='--', label='Best Model')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Loss')
-    plt.legend()
-    plt.grid(True)
+    if show_history:
+        # Plot training history
+        plt.figure(figsize=(10, 5))
+        plt.plot(history['train_loss'], label='Training Loss')
+        plt.plot(history['val_loss'], label='Validation Loss')
+        plt.axvline(x=history['best_epoch'], color='r', linestyle='--', label='Best Model')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+
+    return model
+
+
+
+# Function to compute spectral indices
+def compute_indices(df):
+    """
+    Compute vegetation and soil indices useful for SOC modeling
+    using Sentinel-2 bands from the S2-soilsuite dataset.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with Sentinel-2 bands (MREF_B* columns)
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        DataFrame with computed spectral indices
+    """
+    # Create a new DataFrame to store indices
+    indices = pd.DataFrame(index=df.index)
+    
+    # Extract bands for easier reference
+    B = df['MREF_B02']  # Blue
+    G = df['MREF_B03']  # Green
+    R = df['MREF_B04']  # Red
+    RE1 = df['MREF_B05']  # Red Edge 1
+    RE2 = df['MREF_B06']  # Red Edge 2
+    RE3 = df['MREF_B07']  # Red Edge 3
+    N = df['MREF_B08']  # NIR
+    N2 = df['MREF_B8A']  # NIR narrow band
+    S1 = df['MREF_B11']  # SWIR 1
+    S2 = df['MREF_B12']  # SWIR 2
+    
+    # Constants used in some indices
+    L = 0.5  # Soil adjustment factor
+
+    # ----- Vegetation Indices -----
+    
+    # NDVI - Normalized Difference Vegetation Index
+    indices['NDVI'] = (N - R) / (N + R)
+    
+    # GNDVI - Green Normalized Difference Vegetation Index
+    indices['GNDVI'] = (N - G) / (N + G)
+    
+    # EVI - Enhanced Vegetation Index
+    indices['EVI'] = 2.5 * (N - R) / (N + 6 * R - 7.5 * B + 1)
+    
+    # SAVI - Soil-Adjusted Vegetation Index
+    indices['SAVI'] = (1 + L) * (N - R) / (N + R + L)
+    
+    
+    # OSAVI - Optimized Soil-Adjusted Vegetation Index
+    indices['OSAVI'] = (N - R) / (N + R + 0.16)
+    
+    # NDMI - Normalized Difference Moisture Index
+    indices['NDMI'] = (N - S1) / (N + S1)
+    
+    # CIG - Chlorophyll Index Green
+    indices['CIG'] = (N / G) - 1
+    
+    # CIRE - Chlorophyll Index Red Edge
+    indices['CIRE'] = (N / RE1) - 1
+    
+    # MTCI - MERIS Terrestrial Chlorophyll Index
+    indices['MTCI'] = (RE3 - RE1) / (RE1 - R)
+    
+    # NDRE - Normalized Difference Red Edge
+    indices['NDRE'] = (N - RE1) / (N + RE1)
+    
+    # IRECI - Inverted Red Edge Chlorophyll Index
+    indices['IRECI'] = (RE3 - R) / (RE1 / RE2)
+    
+    # S2REP - Sentinel-2 Red Edge Position
+    indices['S2REP'] = 705 + 35 * ((RE3 + R) / 2 - RE1) / (RE2 - RE1)
+    
+    # ----- Soil Indices -----
+    
+    # BI - Bare Soil Index
+    indices['BI'] = ((S1 + R) - (N + B)) / ((S1 + R) + (N + B))
+    
+    # NDSoI - Normalized Difference Soil Index
+    indices['NDSoI'] = (S1 - G) / (S1 + G)
+    
+    # MBI - Modified Bare Soil Index
+    indices['MBI'] = ((S1 - S2 - N) / (S1 + S2 + N)) + 0.5
+    
+    # NSDS - Normalized Shortwave Infrared Difference Soil-Moisture
+    indices['NSDS'] = (S1 - S2) / (S1 + S2)
+    
+    # NSDSI1 - Normalized Shortwave-Infrared Difference Bare Soil Moisture Index 1
+    indices['NSDSI1'] = (S1 - N) / (S1 + N)
+    
+    # NSDSI2 - Normalized Shortwave-Infrared Difference Bare Soil Moisture Index 2
+    indices['NSDSI2'] = (S1 - S2) / (S1 + S2)
+    
+    return indices
+
+def plot_spectra_comparison(*spectra, wavelengths=None, labels=None, title="Spectral Comparison"):
+    """
+    Create a comparison plot of multiple spectra.
+    
+    Args:
+        *spectra: Variable number of spectrum data arrays
+        wavelengths: X-axis values (optional)
+        labels: List/tuple of labels for legend matching number of spectra
+        title: Plot title
+    """
+    import matplotlib.pyplot as plt
+    
+    # Create figure and axis
+    plt.figure(figsize=(12, 6))
+    
+    # Generate x-axis values if not provided
+    if wavelengths is None:
+        wavelengths = range(len(spectra[0]))
+    
+    # Set default labels if not provided
+    if labels is None:
+        labels = [f'Spectrum {i+1}' for i in range(len(spectra))]
+    
+    # Ensure number of labels matches number of spectra
+    if len(labels) != len(spectra):
+        raise ValueError(f"Number of labels ({len(labels)}) must match number of spectra ({len(spectra)})")
+    
+    # Plot each spectrum
+    for spectrum, label in zip(spectra, labels):
+        plt.plot(wavelengths, spectrum, label=label, linewidth=2)
+    
+    # Customize plot
+    plt.title(title, fontsize=14, pad=20)
+    plt.xlabel('Wavelength (nm)', fontsize=12)
+    plt.ylabel('Reflectance', fontsize=12)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.legend(fontsize=10)
+    
+    # Add a subtle background color
+    plt.gca().set_facecolor('#f8f9fa')
+    plt.grid(True, linestyle='--', alpha=0.3)
+    
+    # Adjust layout
+    plt.tight_layout()
     plt.show()
-
-
-    return model, history, metrics

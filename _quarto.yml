@@ -1,0 +1,37 @@
+project:
+  type: book
+# filters:
+#    - include-code-files
+
+book:
+  navbar:
+    collapse: false
+  title: "Course M-GFP3: Imaging and non-imaging spectroscopy:Term Paper"
+  subtitle: "Strategies to enhance predictive modeling of soil organic carbon (SOC) using the LUCAS topsoil spectral library."
+  author: "Deepak, Khuzaima, Luis"
+  date: "February 20, 2025"
+  chapters:
+    - index.qmd  
+    - part: "Main"
+      chapters:
+        - pls_copy.ipynb 
+    - part: "Appendix"
+      chapters:
+        - test_spatial.ipynb
+        - test_spatial_2.ipynb
+      
+# bibliography: quarto_files/references.bib
+
+format:
+  pdf:
+    theme: cosmo
+    code-fold: true
+    toc: true
+    toc-depth: 4
+    code-overflow: scroll 
+    highlight-style: gruvbox
+
+
+
+conda:
+  environment: geo_311
