@@ -267,6 +267,8 @@ def optimize_pls_components(X_train, y_train, max_components=None, step=1, fine_
     if plot_results:
         plt.tight_layout()
         plt.show()
+
+    print(f"Optimal number of components: {results['optimal_n']}")
     
     return results
 
@@ -301,7 +303,7 @@ def plot_components_vs_rmse(components, rmse_values, model_name="Model", figsize
     plt.grid(True)
     plt.show()
     
-def plot_prediction_scatter(y_true, y_pred, model_name="Model", figsize=(7, 5)):
+def plot_prediction_scatter(y_true, y_pred, model_name="Model", figsize=(7, 5), color ="#1f77b4"):
     """
     Plot actual vs. predicted values scatter plot.
     
@@ -317,12 +319,12 @@ def plot_prediction_scatter(y_true, y_pred, model_name="Model", figsize=(7, 5)):
         Figure size as (width, height) in inches
     """
     plt.figure(figsize=figsize)
-    plt.scatter(y_true, y_pred, alpha=0.5)
+    plt.scatter(y_true, y_pred, alpha=0.5, color = color)
     plt.plot([min(y_true), max(y_true)], [min(y_true), max(y_true)], 
              color='red', linestyle='--')  # Perfect prediction line
     plt.xlabel('Actual Values')
     plt.ylabel('Predicted Values')
-    plt.title(f'Actual vs Predicted Values ({model_name})')
+    plt.title(f'{model_name}: Actual vs Predicted Values')
     plt.grid(True)
     plt.show()
 
@@ -559,7 +561,7 @@ class EarlyStopping:
 def train_lstm(X_train, X_val, X_test, y_train, y_val, y_test, 
                           hidden_size=256, num_layers=5, num_epochs=500, 
                           learning_rate=0.005, patience=7, dropout=0.2,
-                          show_training=False, show_history=False):
+                          show_training=False, show_history=True):
     # Convert to tensors
     X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
     X_val_tensor = torch.tensor(X_val, dtype=torch.float32)

@@ -14,11 +14,12 @@ book:
     - index.qmd  
     - part: "Main"
       chapters:
-        - pls_copy.ipynb 
+        - pls.ipynb 
     - part: "Appendix"
       chapters:
-        - test_spatial.ipynb
-        - test_spatial_2.ipynb
+        - own_functions.py 
+        - load_dlr_data.ipynb
+        - load_isric_data.ipynb
       
 # bibliography: quarto_files/references.bib
 
